@@ -22,6 +22,12 @@ class GameViewController: UIViewController, SCNSceneRendererDelegate, SCNPhysics
     var previousUpdateTime : TimeInterval?
     let spawnInterval : Float = 1.0 // 0.25
     var timeToSpawn : TimeInterval = 1.0
+    var explosion : SCNParticleSystem?
+    var hud : SKScene?
+    var marcadorIceBall : SKLabelNode?
+    var numIceBalls : Int = 0
+    var soundFire : SCNAudioSource?
+    var soundExplosion : SCNAudioSource?
     
     let categoryMaskDragon = 0b001 // (1)
     let categoryMaskShot = 0b010 // (2)
@@ -70,14 +76,20 @@ class GameViewController: UIViewController, SCNSceneRendererDelegate, SCNPhysics
         startMotionUpdates()
         startTapRecognition(inView: scnView)
         setupIceBalls(forView: scnView)
+        setupAudio(inScene: scene!)
         
         scene?.physicsWorld.contactDelegate = self
+        
+        // Inicializacion de efecto de particulas
+        self.explosion = SCNParticleSystem(named: "Explode.scnp", inDirectory: nil)
+
     }
     
     override func viewDidAppear(_ animated: Bool) {
         let scnView = self.view as! SCNView
         
         setupLimits(forView: scnView)
+        setupHUD(inView: scnView)
     }
     
     func physicsWorld(_ world: SCNPhysicsWorld,
@@ -213,10 +225,16 @@ class GameViewController: UIViewController, SCNSceneRendererDelegate, SCNPhysics
         bulletPhysicsBody.categoryBitMask = categoryMaskShot
         bulletPhysicsBody.contactTestBitMask = categoryMaskIceBall
         bulletNode.physicsBody = bulletPhysicsBody
+        
+        // Reproduce el sonido soundFire
+        if let soundFire = soundFire {
+            let playSoundAction = SCNAction.playAudio(soundFire, waitForCompletion: false)
+            bulletNode.runAction(playSoundAction)
+        }
     }
     
     func setupLimits(forView view: SCNView) {
-        // Calcular y almacenar en `self.limits` el rectángulo que defina los límites de la zona "jugable" dentro del plano XZ de la escena, donde la nave, disparos y asteroides se puedan mover sin salirse de los límites de la pantalla.
+        // Calcular y almacenar en `self.limits` el rectángulo que defina los límites de la zona "jugable" dentro del plano XZ de la escena, donde la nave, disparos y ice balls se puedan mover sin salirse de los límites de la pantalla.
         let projectedOrigin = view.projectPoint(SCNVector3Zero)
         let unprojectedLeft = view.unprojectPoint(
                 SCNVector3Make(0,
@@ -254,7 +272,7 @@ class GameViewController: UIViewController, SCNSceneRendererDelegate, SCNPhysics
         // Girar la nave en el eje Z según el valor de velocity
         cameraNode!.eulerAngles.z = cameraEulerAngle!.z - velocity * 0.1
         
-        // TODO [C03]: Spawn de ice balls
+        // Spawn de ice balls
         //  - Descontamos el deltatime de timeToSpawn, y cuando este llegue a 0 generamos un nuevo ice ball y restablecemos el valor de timeToSpawn a spawnInterval.
         //  - El ice ball debe generarse en una posicion X aleatoria entre los limites de la escena (limits.minX y limits.maxX), Y=0, y Z=limits.minY
         timeToSpawn -= deltaTime
@@ -312,16 +330,41 @@ class GameViewController: UIViewController, SCNSceneRendererDelegate, SCNPhysics
         }
     }
     
+    // TODO: Fix explosion sound not playing
     func destroyIceBall(ice_ball: SCNNode, withBullet bullet: SCNNode) {
-//        showExplosion(onNode: asteroid)
+        // Mostrar la explosión en la posición del ice ball
+        showExplosion(onNode: ice_ball)
         
-        // Elimina el nodo del ice ball y el de la bala de la escena
+        numIceBalls += 1
+            
+        // Actualiza el texto del marcador marcadorIceBall con el nuevo valor de numIceBalls
+        marcadorIceBall?.text = "\(numIceBalls) HITS"
+        
+        // Crear un nodo vacío en la posición del ice ball
+        let soundNode = SCNNode()
+        soundNode.position = ice_ball.presentation.position
+        
+        // Reproducir el sonido de la explosión desde este nodo
+        if let soundExplosion = soundExplosion {
+            let playSoundAction = SCNAction.playAudio(soundExplosion, waitForCompletion: false)
+            
+            // Configurar una acción para eliminar el nodo después de reproducir el sonido
+            let removeNodeAction = SCNAction.removeFromParentNode()
+            
+            // Secuenciar ambas acciones
+            let sequenceAction = SCNAction.sequence([playSoundAction, removeNodeAction])
+            
+            // Ejecutar la secuencia de acciones sobre el nodo vacío
+            soundNode.runAction(sequenceAction)
+        }
+        
+        // Eliminar el nodo del ice ball y el de la bala de la escena
         ice_ball.removeFromParentNode()
         bullet.removeFromParentNode()
     }
 
     func destroyDragon(dragon: SCNNode, withIceBall ice_ball: SCNNode) {
-//        showExplosion(onNode: asteroid)
+//        showExplosion(onNode: ice_ball)
         
         // Elimina el nodo del dragon y hace que la nave salga despedida hacia atrás mientras rota alrededor de su eje Y
         dragon.removeFromParentNode()
@@ -333,6 +376,87 @@ class GameViewController: UIViewController, SCNSceneRendererDelegate, SCNPhysics
         
         // Ejecuta la acción sobre la cámara
         cameraNode?.runAction(groupAction)
+    }
+    
+    func showExplosion(onNode node: SCNNode) {
+        // Clonar el efecto de partículas "explode"
+        guard let explosionClone = explosion?.copy() as? SCNParticleSystem else {
+            fatalError("Failed to clone explosion particle system.")
+        }
+        
+        // Asignar la posición del nodo recibido como parámetro
+        explosionClone.emitterShape = SCNBox(width: 1, height: 1, length: 1, chamferRadius: 0) // Asignar una forma pequeña como el emisor de las partículas
+        
+        // Crear un nodo para contener el efecto de partículas
+        let particleNode = SCNNode()
+        particleNode.addParticleSystem(explosionClone)
+        
+        // Asignar la posición del nodo del ice ball como la posición del efecto de partículas
+        particleNode.position = node.presentation.position
+        
+        // Agregar el nodo de partículas a la escena
+        scene?.rootNode.addChildNode(particleNode)
+        
+        // Crear un nodo vacío en la posición donde estaba el ice ball que ha explotado
+        let soundNode = SCNNode()
+        soundNode.position = node.presentation.position
+        
+        // Reproduce el sonido de la explosión mediante una acción sobre dicho nodo
+        if let soundExplosion = soundExplosion {
+            let playSoundAction = SCNAction.playAudio(soundExplosion, waitForCompletion: false)
+            
+            // Tras completarse la acción de reproducción de sonido, ejecutar una acción que elimine al nodo de su padre
+            let removeNodeAction = SCNAction.removeFromParentNode()
+            
+            // Secuenciar ambas acciones
+            let sequenceAction = SCNAction.sequence([playSoundAction, removeNodeAction])
+            
+            // Ejecutar la secuencia de acciones sobre el nodo vacío
+            soundNode.runAction(sequenceAction)
+        }
+    }
+    
+    func setupHUD(inView view: SCNView) {
+        // Crea escena SpriteKit del mismo tamaño que la vista SCNView
+        let skScene = SKScene(size: view.bounds.size)
+        skScene.scaleMode = .resizeFill
+        
+        // Crea etiqueta SKLabelNode
+        let label = SKLabelNode(fontNamed: "University") // OJO
+        label.text = "0 HITS"
+        label.fontSize = 36
+        label.fontColor = .red
+        label.verticalAlignmentMode = .top
+        label.position = CGPoint(x: skScene.size.width / 2, y: skScene.size.height - view.safeAreaInsets.top)
+        
+        // Agregar la etiqueta como nodo hijo a la escena SpriteKit
+        skScene.addChild(label)
+        
+        // Asignar la escena SpriteKit y la etiqueta a las propiedades de la clase
+        self.marcadorIceBall = label
+        self.hud = skScene
+        
+        // Asignar la escena SpriteKit al overlaySKScene de la vista SCNView
+        view.overlaySKScene = skScene
+    }
+    
+    func setupAudio(inScene scene: SCNScene) {
+        // Reproducir música de fondo "got.mp3" en bucle, con volumen 0.1, y desde el nodo raíz de la escena
+        let backgroundMusic = SCNAudioSource(fileNamed: "got.mp3")!
+        backgroundMusic.volume = 0.1
+        backgroundMusic.loops = true
+        let musicAction = SCNAction.playAudio(backgroundMusic, waitForCompletion: false)
+        scene.rootNode.runAction(musicAction)
+        
+        // Precargar el efecto fire-breath.mp3, con volumen 10.0, y asignarlo al campo soundFire
+        let fireSound = SCNAudioSource(fileNamed: "fire-breath.mp3")!
+        fireSound.volume = 0.3
+        self.soundFire = fireSound
+        
+        // Precargar el efecto explosion.mp3
+        let soundExplosion = SCNAudioSource(fileNamed: "explosion.mp3")!
+        soundExplosion.volume = 9.0
+        self.soundExplosion = soundExplosion
     }
 
     
