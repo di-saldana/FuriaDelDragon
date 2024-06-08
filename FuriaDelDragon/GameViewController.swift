@@ -80,6 +80,17 @@ class GameViewController: UIViewController, SCNSceneRendererDelegate, SCNPhysics
         setupLimits(forView: scnView)
     }
     
+    func physicsWorld(_ world: SCNPhysicsWorld,
+                 didBegin contact: SCNPhysicsContact) {
+        if(contact.nodeA.name == "ice_ball") {
+            onContact(ice_ball: contact.nodeA,
+                      toNode: contact.nodeB)
+        } else if(contact.nodeB.name == "ice_ball") {
+            onContact(ice_ball: contact.nodeB,
+                      toNode: contact.nodeA)
+        }
+    }
+    
     @objc
     func handleTap(_ gestureRecognize: UIGestureRecognizer) {
         // retrieve the SCNView
@@ -195,6 +206,13 @@ class GameViewController: UIViewController, SCNSceneRendererDelegate, SCNPhysics
         
         // Ejecutamos la accion sobre la bala
         bulletNode.runAction(sequenceAction)
+        
+        // Crear un cuerpo físico para la bala
+        let bulletPhysicsShape = SCNPhysicsShape(geometry: SCNSphere(radius: 1.0), options: nil)
+        let bulletPhysicsBody = SCNPhysicsBody(type: .kinematic, shape: bulletPhysicsShape)
+        bulletPhysicsBody.categoryBitMask = categoryMaskShot
+        bulletPhysicsBody.contactTestBitMask = categoryMaskIceBall
+        bulletNode.physicsBody = bulletPhysicsBody
     }
     
     func setupLimits(forView view: SCNView) {
@@ -286,4 +304,36 @@ class GameViewController: UIViewController, SCNSceneRendererDelegate, SCNPhysics
         iceBall.runAction(sequenceAction)
     }
 
+    func onContact(ice_ball: SCNNode, toNode node: SCNNode) {
+        if(node.name == "dragon") {
+            destroyDragon(dragon: node, withIceBall: ice_ball)
+        } else if(node.name == "bullet") {
+            destroyIceBall(ice_ball: ice_ball, withBullet: node)
+        }
+    }
+    
+    func destroyIceBall(ice_ball: SCNNode, withBullet bullet: SCNNode) {
+//        showExplosion(onNode: asteroid)
+        
+        // Elimina el nodo del ice ball y el de la bala de la escena
+        ice_ball.removeFromParentNode()
+        bullet.removeFromParentNode()
+    }
+
+    func destroyDragon(dragon: SCNNode, withIceBall ice_ball: SCNNode) {
+//        showExplosion(onNode: asteroid)
+        
+        // Elimina el nodo del dragon y hace que la nave salga despedida hacia atrás mientras rota alrededor de su eje Y
+        dragon.removeFromParentNode()
+        
+        // Define la acción para hacer que la nave salga despedida hacia atrás mientras rota
+        let moveAction = SCNAction.move(by: SCNVector3(0, 50, 50), duration: 1.0)
+        let rotateAction = SCNAction.rotateBy(x: 0, y: 6.3, z: 0, duration: 1.0)
+        let groupAction = SCNAction.group([moveAction, rotateAction])
+        
+        // Ejecuta la acción sobre la cámara
+        cameraNode?.runAction(groupAction)
+    }
+
+    
 }
